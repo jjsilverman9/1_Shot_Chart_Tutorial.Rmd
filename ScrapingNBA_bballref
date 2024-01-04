@@ -1,0 +1,125 @@
+---
+title: "Scraping NBA game data"
+output: html_notebook
+---
+```{r}
+library(rvest)
+library(lubridate)
+```
+
+```{r}
+year <- "2018"
+month <- "october"
+url <- paste0("https://www.basketball-reference.com/leagues/NBA_", year, 
+                  "_games-", month, ".html")
+webpage <- read_html(url) #can get the webpage as an xml_document object by using rvest‘s read_html function
+```
+
+```{r}
+col_names <- webpage %>% 
+        html_nodes("table#schedule > thead > tr > th") %>% 
+        html_attr("data-stat")    
+col_names <- c("game_id", col_names)
+```
+
+#Next, I will extract the dates and game IDs in a similar manner. The only snag here is that the table in the month of April is slightly different, since the playoffs start that month:
+
+```{r}
+dates <- webpage %>% 
+        html_nodes("table#schedule > tbody > tr > th") %>% 
+        html_text()
+dates <- dates[dates != "Playoffs"]
+
+game_id <- webpage %>% 
+    html_nodes("table#schedule > tbody > tr > th") %>%
+    html_attr("csk")
+game_id <- game_id[!is.na(game_id)]
+```
+
+#We then combine this data along with dates and game_id into a single data frame:
+```{r}
+data <- webpage %>% 
+        html_nodes("table#schedule > tbody > tr > td") %>% 
+        html_text() %>%
+        matrix(ncol = length(col_names) - 2, byrow = TRUE)
+
+month_df <- as.data.frame(cbind(game_id, dates, data), stringsAsFactors = FALSE)
+names(month_df) <- col_names
+```
+
+#From here, assume that we did the above for all the months and combined them into one big data frame df. When web scraping, all the data is pulled out as character strings, so we need to do some typecasting to get the data into the correct type. I also added a column to indicate whether a game was a regular season game or a playoff game (this is where we need the lubridate package) and dropped the box score column.
+```{r}
+# change columns to the correct types
+df <- month_df
+df$visitor_pts <- as.numeric(df$visitor_pts)
+df$home_pts    <- as.numeric(df$home_pts)
+df$attendance  <- as.numeric(gsub(",", "", df$attendance))
+df$date_game   <- mdy(df$date_game)
+
+# add column to indicate if regular season or playoff
+playoff_startDate <- ymd("2018-04-14")
+df$game_type <- with(df, ifelse(date_game >= playoff_startDate, 
+                                "Playoff", "Regular"))
+
+# drop boxscore column
+df$box_score_text <- NULL
+```
+
+#Let’s perform a sanity check by recreating the regular season table standings for each conference. The code in this section could be more elegant by using functions from the tidyverse, but I’ll demonstrate that we can do what we want using just base R functions.
+
+#First we create columns indicating the winner and loser of each game, then pull out just the regular season games:
+```{r}
+df$winner <- with(df, ifelse(visitor_pts > home_pts, 
+                             visitor_team_name, home_team_name))
+df$loser <- with(df, ifelse(visitor_pts < home_pts, 
+                             visitor_team_name, home_team_name))
+regular_df <- subset(df, game_type == "Regular")
+
+```
+
+#Next, we build up a new data frame where each row corresponds to one team. We manually input the conference and division for each team, since there are only 30 of them (getting them programmatically would probably take longer than manual data entry):
+```{r}
+teams <- sort(unique(regular_df$visitor_team_name))
+standings <- data.frame(team = teams, stringsAsFactors = FALSE)
+
+
+standings$conf <- c("East", "East", "East", "East", "East",
+                    "East", "West", "West", "East", "West",
+                    "West", "East", "West", "West", "West",
+                    "East", "East", "West", "West", "East",
+                    "West", "East", "East", "West", "West",
+                    "West", "West", "East", "West", "East")
+standings$div <- c("Southeast", "Atlantic", "Atlantic", "Southeast", "Central",
+                   "Central", "Southwest", "Northwest", "Central", "Pacific",
+                   "Southwest", "Central", "Pacific", "Pacific", "Southwest",
+                   "Southeast", "Central", "Northwest", "Southwest", "Atlantic",
+                   "Northwest", "Southeast", "Atlantic", "Pacific", "Northwest",
+                   "Pacific", "Southwest", "Atlantic", "Northwest", "Southeast")
+
+```
+
+#We populate the win loss columns in the following way: for each team, find the number of times it appears in each of the winner and loser columns in df. I use a for loop here, which is not a big problem here since there are only 30 teams, but the code could probably be improved to avoid the loop.
+```{r}
+standings$win <- 0; standings$loss <- 0
+for (i in 1:nrow(standings)) {
+    standings$win[i]  <- sum(regular_df$winner == standings$team[i])
+    standings$loss[i] <- sum(regular_df$loser  == standings$team[i])
+}
+```
+
+#win-loss percentage
+```{r}
+standings$wl_pct <- with(standings, win / (win + loss))
+```
+
+```{r}
+# Eastern conference standings
+east_standings <- subset(standings, conf == "East")
+east_standings[with(east_standings, order(-wl_pct, team)), 
+    c("team", "win", "loss")]
+
+# Western conference standings
+west_standings <- subset(standings, conf == "West")
+west_standings[with(west_standings, order(-wl_pct, team)),
+    c("team", "win", "loss")]
+```
