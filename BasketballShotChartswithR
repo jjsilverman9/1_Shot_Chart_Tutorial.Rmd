@@ -1,0 +1,38 @@
+---
+title: "Basketball Shot Charts with R"
+output: html_notebook
+---
+
+
+
+```{r}
+library(BasketballAnalyzeR)
+PbP <- PbPmanipulation(PbP.BDB) #extract data in df format
+str(PbP)
+
+
+subdata <- subset(PbP, player== "Kevin Durant")
+
+subdata$xx <- subdata$original_x/10 #create shot chart for half court
+subdata$yy <- subdata$original_y/10-41.75 #use 41.75 for distance of hoop to center of the court
+
+shotchart(data=subdata, x="xx", y="yy", scatter = T,
+          pt.col = 'blue',
+          bg.col = 'yellow')
+shotchart(data=subdata, x="xx", y="yy", scatter = T,
+          z="result",
+          bg.col = 'black',
+          courtline.col = 'white',
+          palette = 'hot')
+
+shotchart(data=subdata, x="xx", y="yy", scatter = T,
+          num.sect = 5,
+          type = 'sectors',
+          z='playlength')
+
+shotchart(data=subdata, x="xx", y="yy", scatter = F,
+          num.sect = 5,
+          type = 'sectors',
+          z='playlength',
+          result = 'result')
+```
